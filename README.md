@@ -70,7 +70,9 @@ box OOMs somewhere around **80–90M series**.
 | `scripts/run-bench.sh` | One cold run: starts exporters + a fresh Prometheus, samples 1/s, writes `samples.csv` + `summary.{json,txt}`. Knobs: `SERIES` (total), `TARGETS`, `AUTO_INTERVAL`, `INTERVAL`, `DURATION`, `PROM_CORES`/`GEN_CORES`. |
 | `scripts/ramp.sh` | Cold-restart ladder over `SERIES_LIST`; aggregates each run's summary to one CSV. Good for the per-cardinality curve and the **strict-1s scrape-timeout wall**. |
 | `scripts/grow-to-oom.sh` | **One** long-lived Prometheus, **fixed `TARGETS` (= cores)**, grows each target's series via `/resize` until **OOM**. Records steady CPU + worst-case scrape + RSS at each plateau. This is the "test to failure" runner. |
+| `scripts/rate-max.sh` | Finds **peak sustained ingest rate** (samples/s actually appended). `TARGETS > cores`; at each cardinality it auto-tightens the scrape interval toward the back-to-back (CPU-bound) regime and records the max rate, CPU util, and RSS. Answers "how fast can it ingest?" |
 | `scripts/plot.py` | 3D plot (series × CPU × scrape time) + 2D projections from a ramp/growth CSV; OOM marked. |
+| `scripts/plot-rate.py` | Rate-max plots: ingest rate / CPU util / RSS vs cardinality + a 3D (rate × CPU × memory). |
 
 Go is at `/usr/local/go/bin` (1.26.x).
 
