@@ -1,0 +1,23 @@
+Run:        v3.12.0__series-100000__20260607-044325
+Host:       ubuntu-m-16vcpu-128gb-sfo3  (16 vCPU, 125.8 GiB)
+CPU:        Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz
+Prometheus: v3.12.0  pinned to cores 0-7 (8 cores)
+Target:     100,000 series @ 1s (payload 2.9 MiB)
+Fail:       none
+----------------------------------------------------------------
+Peak head series:         100,005
+Creation reached target:  True
+Peak RSS:                 0.29 GiB
+1s scrape sustained:      True (min up=1.0, max scrape=0.112s)
+----------------------------------------------------------------
+CREATION (ingest of N new series):
+  window:                 1.06 s
+  series created:         68,900
+  CPU used for ingest:    0.757 cores (9.5% of 8 allocated)
+  CPU per 1M series:      11.611 cpu-seconds
+  ingest rate:            65,184 series/s
+  scrape duration (1x):   0.112 s   <- worst-case scrape time (3rd plot axis)
+STEADY-STATE (recurring re-append):
+  CPU:                    0.125 cores
+  CPU per 1M samples:     1.3199 cpu-seconds
+  scrape duration:        0.112 s

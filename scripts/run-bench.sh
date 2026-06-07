@@ -32,7 +32,12 @@ cd "$REPO_DIR"
 
 : "${PROM_BIN:?set PROM_BIN to a prometheus binary}"
 : "${PROM_VERSION:?set PROM_VERSION label, e.g. apt-2.45.3 or v3.12.0}"
-SERIES="${SERIES:-100000}"
+SERIES="${SERIES:-100000}"          # TOTAL unique series across all targets
+TARGETS="${TARGETS:-1}"             # number of parallel scrape targets (gen instances)
+# Per-target series. Targets scrape in parallel, so creation wall-time and the
+# 1s-scrape limit scale with PER-TARGET series, while total ingest scales ~N-fold.
+SERIES_PER_TARGET=$(( (SERIES + TARGETS - 1) / TARGETS ))
+SERIES=$(( SERIES_PER_TARGET * TARGETS ))   # round total up to a clean multiple
 DURATION="${DURATION:-30}"
 INTERVAL="${INTERVAL:-1s}"
 TIMEOUT="${TIMEOUT:-$INTERVAL}"
@@ -54,11 +59,13 @@ SAFETY="${SAFETY:-1.6}"                 # interval headroom over estimated creat
 MIN_T="${MIN_T:-5}"; MAX_T="${MAX_T:-1200}"
 STEADY_TAIL="${STEADY_TAIL:-90}"        # extra seconds after creation to watch steady-state
 if [[ "$AUTO_INTERVAL" == 1 ]]; then
-  T="$(awk -v s="$SERIES" -v r="$CREATE_RATE" -v k="$SAFETY" -v lo="$MIN_T" -v hi="$MAX_T" \
+  # Size to PER-TARGET creation time: targets create in parallel, so wall-clock
+  # creation tracks per-target series, not the total.
+  T="$(awk -v s="$SERIES_PER_TARGET" -v r="$CREATE_RATE" -v k="$SAFETY" -v lo="$MIN_T" -v hi="$MAX_T" \
         'BEGIN{t=int(s/r*k)+1; if(t<lo)t=lo; if(t>hi)t=hi; print t}')"
   INTERVAL="${T}s"; TIMEOUT="${T}s"
   DURATION="${DURATION_OVERRIDE:-$((T + STEADY_TAIL))}"
-  echo "    AUTO_INTERVAL: interval=timeout=${T}s, duration=${DURATION}s (create_rate=${CREATE_RATE}/s)"
+  echo "    AUTO_INTERVAL: interval=timeout=${T}s, duration=${DURATION}s (per-target=${SERIES_PER_TARGET}, create_rate=${CREATE_RATE}/s)"
 fi
 
 # Count CPUs in a set like "0-7" or "0,2,4" so we can pin GOMAXPROCS to match.
@@ -86,20 +93,21 @@ GEN_LOG="$OUT_DIR/metricgen.log"
 PROM_LOG="$OUT_DIR/prometheus.log"
 TSDB_DIR="$(mktemp -d /tmp/tsdb-bench.XXXXXX)"
 
+GEN_PIDS=()
 cleanup() {
   set +e
   [[ -n "${PROM_PID:-}" ]] && kill "$PROM_PID" 2>/dev/null
-  [[ -n "${GEN_PID:-}" ]] && kill "$GEN_PID" 2>/dev/null
+  for p in "${GEN_PIDS[@]}"; do kill "$p" 2>/dev/null; done
   sleep 1
   [[ -n "${PROM_PID:-}" ]] && kill -9 "$PROM_PID" 2>/dev/null
-  [[ -n "${GEN_PID:-}" ]] && kill -9 "$GEN_PID" 2>/dev/null
+  for p in "${GEN_PIDS[@]}"; do kill -9 "$p" 2>/dev/null; done
   rm -rf "$TSDB_DIR"
 }
 trap cleanup EXIT
 
 echo "==> Run $RUN_ID"
 echo "    prom=$PROM_BIN cores=$PROM_CORES (n=$PROM_NCORES)  gen cores=$GEN_CORES (n=$GEN_NCORES)"
-echo "    series=$SERIES duration=${DURATION}s interval=$INTERVAL timeout=$TIMEOUT"
+echo "    targets=$TARGETS  series=$SERIES total (${SERIES_PER_TARGET}/target)  duration=${DURATION}s interval=$INTERVAL timeout=$TIMEOUT"
 
 # --- build generator (once) -------------------------------------------------
 GEN_BIN="$REPO_DIR/metricgen/metricgen"
@@ -108,28 +116,49 @@ if [[ ! -x "$GEN_BIN" || metricgen/main.go -nt "$GEN_BIN" ]]; then
   ( cd metricgen && "$GO" build -o metricgen . )
 fi
 
-# --- render prometheus config ----------------------------------------------
+# --- render prometheus config (N targets) ----------------------------------
+# Series stay globally unique across targets because Prometheus stamps each with a
+# distinct instance label (host:port), so total head series = TARGETS x per-target.
 CONFIG="$OUT_DIR/prometheus.yml"
-sed -e "s/__INTERVAL__/$INTERVAL/" \
-    -e "s/__TIMEOUT__/$TIMEOUT/" \
-    -e "s/__GEN_PORT__/$GEN_PORT/" \
-    configs/prometheus.tmpl.yml > "$CONFIG"
+{
+  echo "global:"
+  echo "  scrape_interval: $INTERVAL"
+  echo "  scrape_timeout: $TIMEOUT"
+  echo "  evaluation_interval: 1m"
+  echo "scrape_configs:"
+  echo "  - job_name: synthetic"
+  echo "    honor_timestamps: true"
+  echo "    static_configs:"
+  echo "      - targets:"
+  for ((k=0; k<TARGETS; k++)); do echo "          - \"127.0.0.1:$((GEN_PORT + k))\""; done
+  echo "        labels:"
+  echo "          bench: \"ingest\""
+} > "$CONFIG"
 
-# --- start generator --------------------------------------------------------
-echo "==> starting metricgen (building $SERIES-series payload)"
-GOMAXPROCS="$GEN_NCORES" taskset -c "$GEN_CORES" \
-  "$GEN_BIN" -series "$SERIES" -listen ":$GEN_PORT" -extra-labels "$EXTRA_LABELS" \
-  >"$GEN_LOG" 2>&1 &
-GEN_PID=$!
-
-# Wait for the payload to be built and the endpoint to answer.
-for i in $(seq 1 600); do
-  if curl -fsS "http://127.0.0.1:$GEN_PORT/healthz" >/dev/null 2>&1; then break; fi
-  kill -0 "$GEN_PID" 2>/dev/null || { echo "metricgen died during build:"; cat "$GEN_LOG"; exit 1; }
-  sleep 1
+# --- start N generators -----------------------------------------------------
+echo "==> starting $TARGETS metricgen instance(s), ${SERIES_PER_TARGET} series each"
+for ((k=0; k<TARGETS; k++)); do
+  port=$((GEN_PORT + k))
+  GOMAXPROCS=2 taskset -c "$GEN_CORES" \
+    "$GEN_BIN" -series "$SERIES_PER_TARGET" -listen ":$port" -extra-labels "$EXTRA_LABELS" \
+    >>"$GEN_LOG" 2>&1 &
+  GEN_PIDS+=($!)
 done
-GEN_BYTES="$(curl -fsS "http://127.0.0.1:$GEN_PORT/healthz" | sed -n 's/.*bytes=\([0-9]*\).*/\1/p')"
-echo "    metricgen ready: payload ${GEN_BYTES:-?} bytes"
+
+# Wait for every generator's payload to be built and answering.
+GEN_BYTES=0
+for ((k=0; k<TARGETS; k++)); do
+  port=$((GEN_PORT + k))
+  ready=0
+  for i in $(seq 1 600); do
+    if curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ready=1; break; fi
+    sleep 1
+  done
+  [[ "$ready" == 1 ]] || { echo "metricgen on :$port not ready; log:"; tail -5 "$GEN_LOG"; exit 1; }
+  b="$(curl -fsS "http://127.0.0.1:$port/healthz" | sed -n 's/.*bytes=\([0-9]*\).*/\1/p')"
+  GEN_BYTES=$((GEN_BYTES + ${b:-0}))
+done
+echo "    all $TARGETS generators ready: total payload ${GEN_BYTES} bytes"
 
 # --- start prometheus -------------------------------------------------------
 echo "==> starting prometheus ($PROM_VERSION)"
@@ -246,6 +275,8 @@ meta = dict(
     prom_cores="$PROM_CORES", prom_ncores=int("$PROM_NCORES"),
     gen_cores="$GEN_CORES",
     series_target=int("$SERIES"),
+    targets=int("$TARGETS"),
+    series_per_target=int("$SERIES_PER_TARGET"),
     interval="$INTERVAL", timeout="$TIMEOUT",
     duration_s=int("$DURATION"),
     extra_labels=int("$EXTRA_LABELS"),
@@ -351,7 +382,7 @@ lines=[
  f"Host:       {meta['host']}  ({meta['ncpu_total']} vCPU, {meta['mem_total_gib']} GiB)",
  f"CPU:        {meta['cpu_model']}",
  f"Prometheus: {meta['prom_version']}  pinned to cores {meta['prom_cores']} ({meta['prom_ncores']} cores)",
- f"Target:     {meta['series_target']:,} series @ {meta['interval']} (payload {meta['gen_payload_bytes']/(1<<20):.1f} MiB)",
+ f"Target:     {meta['series_target']:,} series across {meta['targets']} target(s) ({meta['series_per_target']:,}/target) @ {meta['interval']} (payload {meta['gen_payload_bytes']/(1<<20):.1f} MiB)",
  f"Fail:       {meta['fail_reason'] or 'none'}",
  "-"*64,
 ]
