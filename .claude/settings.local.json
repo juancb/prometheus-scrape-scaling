@@ -12,7 +12,9 @@
       "Bash(mkdir -p results)",
       "Bash(touch results/.gitkeep)",
       "Bash(/usr/local/go/bin/go build *)",
-      "Bash(PROM_BIN=/usr/bin/prometheus PROM_VERSION=apt-2.45.3 SERIES=100000 DURATION=25 bash scripts/run-bench.sh)"
+      "Bash(PROM_BIN=/usr/bin/prometheus PROM_VERSION=apt-2.45.3 SERIES=100000 DURATION=25 bash scripts/run-bench.sh)",
+      "Bash(TARGETS=4 CORES=0-15 K_START=100000 K_STEP=100000 K_MAX=300000 INTERVAL=8s PROM_BIN=/home/jbran/prometheus-3.12.0.linux-amd64/prometheus PROM_VERSION=v3-growvalid bash scripts/grow-to-oom.sh)",
+      "Bash(grep -vE '^\\\\s*$')"
     ]
   }
 }
