@@ -26,6 +26,8 @@ constant. The target was **10 million samples/s**.
   **40–64 core regime is not cleanly measured** (see §6): the interval controller
   failed to saturate the CPU there, so those points are reported as lower bounds.
 
+  ![Figure 1](scale-rate-vs-cores.png)
+
 ---
 
 ## 2. What we varied and what we held fixed
