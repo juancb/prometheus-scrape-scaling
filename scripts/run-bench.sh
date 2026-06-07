@@ -235,8 +235,11 @@ def delta(b, a, key):
     bv, av = f(b[key]), f(a[key])
     return (bv-av) if (bv is not None and av is not None) else None
 
-if len(usable) > warm+1:
-    a=usable[warm]; b=usable[-1]
+# Anchor the window to rows that actually recorded an appended-samples value
+# (the first few samples precede the first scrape), then drop `warm` of those.
+ingest_rows=[r for r in usable if f(r["samples_appended_total"]) is not None]
+if len(ingest_rows) > warm+1:
+    a=ingest_rows[warm]; b=ingest_rows[-1]
     dt=delta(b,a,"t_elapsed") or 0.0
     dcpu=delta(b,a,"cpu_seconds_total")
     dsamp=delta(b,a,"samples_appended_total")
