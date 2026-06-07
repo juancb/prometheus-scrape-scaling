@@ -107,20 +107,23 @@ compounding with) the controller issue discussed in §6.
 
 ## 5. Results
 
-| cores | total series | runs | saturated | peak ingest | M/s per core | mean CPU | mean RSS |
-|------:|-------------:|:----:|:---------:|------------:|-------------:|---------:|---------:|
-|  4 | 1.6 M | 5 | 5 |  **3.46 M/s** ±0.15 | 0.865 | 97% | 3.2 GiB |
-|  8 | 3.2 M | 5 | 5 |  **6.35 M/s** ±0.15 | 0.793 | 96% | 6.7 GiB |
-| 16 | 6.4 M | 5 | 5 | **11.69 M/s** ±0.14 | 0.730 | 95% | 13.0 GiB |
-| 24 | 9.6 M | 5 | 5 | **16.42 M/s** ±0.47 | 0.684 | 94% | 18.7 GiB |
-| 32 | 12.8 M | 5 | 2 | **19.98 M/s** ±8.1 | 0.624 | 73%¹ | 23.4 GiB |
-| 40 | 16.0 M | 5 | 1 | 20.60 M/s ‡ | 0.515 | 53%¹ | 29.7 GiB |
-| 48 | 19.2 M | 5 | 0 | **≥ 11.95 M/s** † | ≥0.249 | 38% | 37.5 GiB |
-| 56 | 22.4 M | 5 | 0 | **≥ 10.43 M/s** † | ≥0.186 | 27% | 39.5 GiB |
-| 64 | 25.6 M | 5 | 1 | 23.55 M/s ‡ | 0.368 | 39%¹ | 44.9 GiB |
+| cores | total series | runs | saturated | peak ingest | scrape interval | M/s per core | mean CPU | mean RSS |
+|------:|-------------:|:----:|:---------:|------------:|----------------:|-------------:|---------:|---------:|
+|  4 | 1.6 M | 5 | 5 |  **3.46 M/s** ±0.15 | 0.47 s | 0.865 | 97% | 3.2 GiB |
+|  8 | 3.2 M | 5 | 5 |  **6.35 M/s** ±0.15 | 0.51 s | 0.793 | 96% | 6.7 GiB |
+| 16 | 6.4 M | 5 | 5 | **11.69 M/s** ±0.14 | 0.56 s | 0.730 | 95% | 13.0 GiB |
+| 24 | 9.6 M | 5 | 5 | **16.42 M/s** ±0.47 | 0.59 s | 0.684 | 94% | 18.7 GiB |
+| 32 | 12.8 M | 5 | 2 | **19.98 M/s** ±8.1 | 0.65 s | 0.624 | 73%¹ | 23.4 GiB |
+| 40 | 16.0 M | 5 | 1 | 20.60 M/s ‡ | 0.74 s | 0.515 | 53%¹ | 29.7 GiB |
+| 48 | 19.2 M | 5 | 0 | **≥ 11.95 M/s** † | 1.76 s | ≥0.249 | 38% | 37.5 GiB |
+| 56 | 22.4 M | 5 | 0 | **≥ 10.43 M/s** † | 2.17 s | ≥0.186 | 27% | 39.5 GiB |
+| 64 | 25.6 M | 5 | 1 | 23.55 M/s ‡ | 0.97 s | 0.368 | 39%¹ | 44.9 GiB |
 
 ¹ mean CPU is dragged down by un-saturated replicates; the saturated rep(s) hit
 90–96%.  ‡ single saturated replicate — suggestive, not a confident mean.
+`scrape interval` is the interval that produced the peak-ingest figure in that
+row (= `scrape_timeout`, back-to-back); mean over saturated replicates where
+≥2 saturated, else the single saturated / peak-replicate value.
 † **lower bound** — controller never saturated (§6).
 
 See `scale-rate-vs-cores.png`:
