@@ -1,0 +1,2 @@
+cores,targets,total_series,replicate,interval_s,scrape_s,ingest_rate_per_s,cpu_cores,cpu_pct_of_ncores,rss_gib,min_up,event
+4,8,1600000,1,0.467,0.33978871,3472221,3.845,96.1,3.23,1,
