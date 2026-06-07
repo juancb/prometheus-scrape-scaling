@@ -25,7 +25,8 @@
 #
 # Env:
 #   TARGETS     exporters/targets (> cores)                 (default 24)
-#   CORES       cpu set prom+exporters share                (default 0-15)
+#   CORES       cpu set for prometheus (GOMAXPROCS sized to it) (default 0-15)
+#   GEN_CORES   cpu set for exporters; defaults to CORES        (shared) if unset
 #   K_LIST      per-target series values to sweep           (default below)
 #   HEADROOM    interval = scrape_duration * HEADROOM       (default 1.2)
 #   INT_FLOOR_MS minimum scrape interval in ms              (default 250)
@@ -36,6 +37,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$REPO_DIR"
 : "${PROM_BIN:?set PROM_BIN}"; : "${PROM_VERSION:?set PROM_VERSION}"
 TARGETS="${TARGETS:-24}"
 CORES="${CORES:-0-15}"
+GEN_CORES="${GEN_CORES:-$CORES}"
 NCORES=$(( $(echo "$CORES" | awk -F- '{print ($2?$2:$1)-$1+1}') ))
 # per-target series; totals (x24) = 2.4,4.8,9.6,14.4,19.2,28.8,38.4 M
 K_LIST="${K_LIST:-100000 200000 400000 600000 800000 1200000 1600000}"
@@ -66,8 +68,8 @@ cleanup() {
 trap cleanup EXIT
 
 read -r -a KS <<<"$K_LIST"; K_START="${KS[0]}"
-echo "==> rate-max $PROM_VERSION  targets=$TARGETS cores=$CORES(n=$NCORES)  K_LIST=[$K_LIST]"
-echo "    box: $NCORES vCPU / $(awk '/MemTotal/{printf "%.0f", $2/1048576}' /proc/meminfo) GiB RAM"
+echo "==> rate-max $PROM_VERSION  targets=$TARGETS prom_cores=$CORES(n=$NCORES) gen_cores=$GEN_CORES  K_LIST=[$K_LIST]"
+echo "    box: $(nproc) vCPU / $(awk '/MemTotal/{printf "%.0f", $2/1048576}' /proc/meminfo) GiB RAM"
 echo "    out: $OUT_DIR"
 
 GEN_BIN="$REPO_DIR/metricgen/metricgen"
@@ -90,7 +92,7 @@ reload() { curl -fsS -X POST "$PROM_URL/-/reload" >/dev/null 2>&1; }
 # --- start TARGETS exporters at K_START -------------------------------------
 echo "==> starting $TARGETS exporters at $K_START series each"
 for ((k=0; k<TARGETS; k++)); do
-  GOMAXPROCS=2 taskset -c "$CORES" "$GEN_BIN" -series "$K_START" -listen ":$((GEN_PORT+k))" >>"$GEN_LOG" 2>&1 &
+  GOMAXPROCS=2 taskset -c "$GEN_CORES" "$GEN_BIN" -series "$K_START" -listen ":$((GEN_PORT+k))" >>"$GEN_LOG" 2>&1 &
   GEN_PIDS+=($!)
 done
 for ((k=0; k<TARGETS; k++)); do
@@ -104,7 +106,7 @@ GOMAXPROCS="$NCORES" taskset -c "$CORES" \
     --web.listen-address="127.0.0.1:$PROM_PORT" >"$PROM_LOG" 2>&1 &
 PROM_PID=$!
 for i in $(seq 1 60); do curl -fsS "$PROM_URL/-/ready" >/dev/null 2>&1 && break; prom_alive || { echo "prom died:"; tail "$PROM_LOG"; exit 1; }; sleep 1; done
-echo "    prometheus up (pid $PROM_PID, GOMAXPROCS=$NCORES on cores $CORES)"
+echo "    prometheus up (pid $PROM_PID, GOMAXPROCS=$NCORES on cores $CORES; exporters on $GEN_CORES)"
 
 echo "step,targets,series_per_target,head_series,interval_s,scrape_s,ingest_rate_per_s,cpu_cores,cpu_pct_of_ncores,rss_gib,min_up,event" >"$AGG"
 
