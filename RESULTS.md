@@ -16,6 +16,19 @@ Host: `ubuntu-m-16vcpu-128gb-sfo3` — Intel Xeon Gold 6248, **16 vCPU**, **128 
   million samples from 16M → 64M series (larger index, cache misses, GC).
 - **Memory ≈ 1.4–1.6 KB per head series.**
 
+## The state space (load × scrape-time × CPU, color = RSS)
+
+![ingest 3D](report/plots/ingest_3d.png)
+
+One growth run as a trajectory: **X = head series** (load), **Y = worst-case scrape
+duration** (the failure signal), **Z = CPU utilization** (% of 16 cores), **color =
+RSS**. It starts cheap (16M: ~2 s scrape, 6% CPU, 20 GiB) and climbs in CPU and
+memory, then — past ~64M — turns and shoots out along the scrape-duration axis into
+the failure zone (88M→111M at 100–160 s scrapes, ~95% CPU, ~110 GiB) before the OOM
+kill. CPU utilization (clean on every row) saturates toward ~95%:
+
+![CPU utilization vs series](report/plots/cpu_util_vs_series.png)
+
 ## How "ingest CPU" is measured
 
 One Prometheus server scrapes 16 synthetic exporters (one **target** per core, all

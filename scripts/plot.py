@@ -73,6 +73,17 @@ def avg_cores(r):
     return num(r.get("cpu_cores")) or num(r.get("cpu_cores_used"))
 
 
+def util_axis(r):
+    # CPU utilization as % of the cores Prometheus was given. Clean on every row
+    # (it's just average CPU over the window, independent of whether samples
+    # committed), so it works across the whole curve including the failure zone.
+    return num(r.get("cpu_pct_of_ncores"))
+
+
+def rss_axis(r):
+    return num(r.get("rss_gib")) or num(r.get("peak_rss_gib"))
+
+
 def failed(r):
     return bool((r.get("fail_reason") or "").strip())
 
@@ -87,28 +98,33 @@ def main(paths):
     datasets = [load(p) for p in files]
     colors = plt.cm.tab10.colors
 
-    # ---- 3D ----
+    # ---- 3D: state space of ingest-to-failure ----
+    #   X = head series (load)   Y = worst-case scrape (failure signal)
+    #   Z = CPU utilization %    color = RSS GiB (memory)
     fig = plt.figure(figsize=(11, 8))
     ax = fig.add_subplot(111, projection="3d")
+    sc = None
     for i, (label, rows) in enumerate(datasets):
-        xs, ys, zs = [], [], []
-        fx, fy, fz = [], [], []
+        xs, ys, zs, cs = [], [], [], []
         for r in rows:
-            x, y, z = series_axis(r), cpu_axis(r), scrape_axis(r)
+            x, y, z = series_axis(r), scrape_axis(r), util_axis(r)
             if None in (x, y, z):
                 continue
-            if failed(r):
-                fx.append(x); fy.append(y); fz.append(z)
-            xs.append(x); ys.append(y); zs.append(z)
+            xs.append(x); ys.append(y); zs.append(z); cs.append(rss_axis(r) or 0)
         if xs:
-            ax.plot(xs, ys, zs, "-o", color=colors[i % 10], label=label, markersize=5)
-        if fx:
-            ax.scatter(fx, fy, fz, color="red", marker="X", s=140, label=f"{label} OOM/fail")
-    ax.set_xlabel("series (requests)")
-    ax.set_ylabel("CPU-s per 1M series")
-    ax.set_zlabel("worst-case scrape (s)")
-    ax.set_title("Prometheus ingest: series x CPU x scrape time")
-    ax.legend(loc="upper left", fontsize=8)
+            ax.plot(xs, ys, zs, "-", color="0.6", lw=1, zorder=1)
+            sc = ax.scatter(xs, ys, zs, c=cs, cmap="viridis", s=70,
+                            edgecolors="k", linewidths=0.4, depthshade=False,
+                            label=label, zorder=3)
+            for x, y, z in zip(xs, ys, zs):
+                ax.text(x, y, z, f"  {x/1e6:.0f}M", fontsize=7, color="0.25")
+    ax.set_xlabel("head series (load)", labelpad=10)
+    ax.set_ylabel("worst-case scrape (s)", labelpad=10)
+    ax.set_zlabel("CPU utilization (% of cores)", labelpad=8)
+    ax.set_title("Prometheus ingest-to-failure: load x scrape-time x CPU (color = RSS GiB)")
+    ax.view_init(elev=18, azim=-72)
+    if sc is not None:
+        cb = fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.12); cb.set_label("RSS (GiB)")
     fig.tight_layout()
     fig.savefig(f"{OUT}/ingest_3d.png", dpi=130)
     print(f"wrote {OUT}/ingest_3d.png")
@@ -142,11 +158,11 @@ def main(paths):
         fig.savefig(f"{OUT}/{fname}", dpi=130)
         print(f"wrote {OUT}/{fname}")
 
+    plot2d(util_axis, "CPU utilization (% of cores)", "cpu_util_vs_series.png")
     plot2d(cpu_axis, "CPU-s per 1M samples (ingest cost)", "cpu_vs_series.png")
     plot2d(scrape_axis, "worst-case scrape duration (s)", "scrape_vs_series.png", logy=True)
     plot2d(avg_cores, "sustained cores used for ingest", "cores_vs_series.png")
-    plot2d(lambda r: num(r.get("rss_gib")) or num(r.get("peak_rss_gib")),
-           "RSS (GiB)", "rss_vs_series.png")
+    plot2d(rss_axis, "RSS (GiB)", "rss_vs_series.png")
 
 
 if __name__ == "__main__":
