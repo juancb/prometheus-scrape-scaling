@@ -156,8 +156,13 @@ and frequently failed to drive the CPU to saturation (mean CPU 27–53% at
 trips an occasional timeout; the controller then loosens the interval and settles
 in an under-saturated local optimum rather than holding at the saturated edge.
 The bimodality is visible directly in `scale.csv` — e.g. at 64 cores, four
-replicates sit at ~23% CPU / 9.7 M/s while one caught the saturated regime at
-**95% CPU / 23.55 M/s**.
+replicates sit at ~23% CPU / 9.7 M/s while one (rep2) held the tight basin at
+0.97 s / **95% CPU / 23.55 M/s**. So the saturated state is physically
+reachable; the controller just usually fails to find or hold the optimal
+interval, **because the saturated edge is a thin, unstable band between two
+stable-ish regimes** (loose/under-saturated and tight/timeout) — tightening the
+interval packs the 96–128 scrapes together and raises their duration, so its
+coarse steps overshoot the edge and bounce back to loose.
 
 **Consequences.** The 48c/56c capacities, and the means at 40c/64c, *understate*
 true capacity and are reported as lower bounds / single-rep spot values. The
@@ -165,11 +170,13 @@ fully-replicated, trustworthy science is the **4–32 core** range — and the
 headline 10 M/s answer (16 cores) sits squarely inside it, unaffected.
 
 **Fix for a follow-up run.** Replace the proportional controller with a
-**bisection search on the scrape interval** for the threshold where `min(up)`
-just drops below 1 (the saturated edge), with a longer measurement window and
-scrape-phase jitter to tame duration noise at high target counts. Optionally split
-the study at the 32-core SMT boundary so the physical-core curve and the
-SMT-packing curve are reported separately.
+**bisection on the scrape interval** between a known-good loose interval
+(`min(up)==1`) and a known-bad tight one — it converges on the saturated edge
+regardless of seed or step size — plus a longer measurement window and
+scrape-phase jitter to quiet the tail-latency noise that trips the binary
+`min(up)` gate at high target counts. Optionally split the study at the 32-core
+SMT boundary so the physical-core curve and the SMT-packing curve are reported
+separately.
 
 ---
 
