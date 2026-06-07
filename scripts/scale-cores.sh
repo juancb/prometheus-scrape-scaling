@@ -103,7 +103,7 @@ write_config() { # $1 = interval string, $2 = #targets
     for ((k=0;k<$2;k++)); do echo "          - \"127.0.0.1:$((GEN_PORT+k))\""; done
   } > "$CONFIG"
 }
-reload() { curl -fsS -X POST "$PROM_URL/-/reload" >/dev/null 2>&1; }
+reload() { curl -fsS -X POST "$PROM_URL/-/reload" >/dev/null 2>&1 || true; }
 
 start_exporters() { # $1 = #targets
   local n="$1"
@@ -118,9 +118,9 @@ start_exporters() { # $1 = #targets
   done
 }
 stop_exporters() {
-  for p in "${GEN_PIDS[@]}"; do kill "$p" 2>/dev/null; done
+  for p in "${GEN_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   sleep 1
-  for p in "${GEN_PIDS[@]}"; do kill -9 "$p" 2>/dev/null; done
+  for p in "${GEN_PIDS[@]}"; do kill -9 "$p" 2>/dev/null || true; done
   GEN_PIDS=()
 }
 
@@ -137,12 +137,16 @@ start_prom() { # $1 = N cores, $2 = #targets, $3 = interval string
   return 1
 }
 stop_prom() {
-  [[ -n "$PROM_PID" ]] && kill "$PROM_PID" 2>/dev/null
+  # NB: never let teardown trip `set -e`. Prometheus exits gracefully on SIGTERM,
+  # often before the kill -9 fires, so kill -9 returns non-zero (process gone) --
+  # and wait_port_free can return 1 on a slow socket release. Both are benign here.
+  [[ -n "$PROM_PID" ]] && kill "$PROM_PID" 2>/dev/null || true
   sleep 1
-  [[ -n "$PROM_PID" ]] && kill -9 "$PROM_PID" 2>/dev/null
+  [[ -n "$PROM_PID" ]] && kill -9 "$PROM_PID" 2>/dev/null || true
   PROM_PID=""
-  [[ -n "$TSDB_DIR" ]] && rm -rf "$TSDB_DIR"; TSDB_DIR=""
-  wait_port_free
+  [[ -n "$TSDB_DIR" ]] && rm -rf "$TSDB_DIR" 2>/dev/null || true; TSDB_DIR=""
+  wait_port_free || true
+  return 0
 }
 
 wait_plateau() { # $1 = expected total series; warm until head reaches it; sets HEAD
