@@ -18,6 +18,7 @@ results/**/.snap
 !results/**/ratemax.csv
 !results/**/scale.csv
 !results/**/scale-summary.csv
+!results/**/endurance.csv
 !results/ramp__*.csv
 
 # Transient TSDB data dirs
