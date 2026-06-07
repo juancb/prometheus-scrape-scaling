@@ -169,7 +169,6 @@ def main():
         print(f"* single saturated replicate (wide uncertainty): {cc}")
 
     render_plots(summary, out_dir, target, sat_cpu)
-    render_efficiency_ci(summary, out_dir, target)
     print(f"\nwrote {sum_path}")
 
 
@@ -234,92 +233,6 @@ def render_plots(summary, out_dir, target, sat_cpu):
     p1 = os.path.join(out_dir, "scale-rate-vs-cores.png")
     fig.savefig(p1, dpi=130, bbox_inches="tight")
     print(f"wrote {p1}")
-    plt.close(fig)
-
-
-def render_efficiency_ci(summary, out_dir, target):
-    """Standalone per-core efficiency plot WITH 95% CI error bars, and the
-    ~target-rate operating point called out. Efficiency CI = (rate CI) / cores,
-    so it inherits the saturated-replicate CI; points with <2 saturated reps get
-    a marker but no bar. Written to a separate file (the two-panel plot is kept).
-    """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    cores = [s["cores"] for s in summary]
-
-    # points with a real CI (>=2 saturated reps), single-sat points, lower bounds
-    ci_c, ci_y, ci_e = [], [], []
-    one_c, one_y = [], []
-    lb_c, lb_y = [], []
-    for s in summary:
-        eff = s["cap_per_core"] / 1e6
-        if s["cap_kind"].startswith("measured") and not math.isnan(s["sat_ci95"]):
-            ci_c.append(s["cores"]); ci_y.append(eff)
-            ci_e.append((s["sat_ci95"] / s["cores"]) / 1e6)
-        elif s["cap_kind"] == "measured(n=1)":
-            one_c.append(s["cores"]); one_y.append(eff)
-        else:
-            lb_c.append(s["cores"]); lb_y.append(eff)
-
-    fig, ax = plt.subplots(figsize=(8.4, 5.6))
-    if ci_c:
-        ax.errorbar(ci_c, ci_y, yerr=ci_e, fmt="o-", color="#1f77b4", capsize=5,
-                    lw=2, ms=7, zorder=4,
-                    label="saturated efficiency (mean ±95% CI)")
-    if one_c:
-        ax.scatter(one_c, one_y, marker="o", s=55, facecolors="white",
-                   edgecolors="#1f77b4", lw=1.8, zorder=4,
-                   label="single saturated replicate (no CI)")
-    if lb_c:
-        ax.scatter(lb_c, lb_y, marker="v", s=70, facecolors="none",
-                   edgecolors="#d62728", lw=1.8, zorder=4,
-                   label="under-saturated (lower bound)")
-    if ci_c:
-        ax.axhline(ci_y[0], color="#999", ls="--", lw=1.3,
-                   label=f"baseline {ci_y[0]:.2f} M/s/core @ {ci_c[0]}c")
-
-    # ---- call out the ~target-rate operating point -----------------------
-    # first cleanly-saturated core count that clears the target rate
-    clean = [s for s in summary if s["cap_kind"].startswith("measured")]
-    op = next((s for s in clean if s["cap"] >= target), None)
-    # linear-interpolate the exact core count where total rate == target
-    interp_cores = None
-    pts = sorted(clean, key=lambda s: s["cores"])
-    for a, b in zip(pts, pts[1:]):
-        if a["cap"] <= target <= b["cap"]:
-            frac = (target - a["cap"]) / (b["cap"] - a["cap"])
-            interp_cores = a["cores"] + frac * (b["cores"] - a["cores"])
-            break
-    if interp_cores is not None:
-        ax.axvline(interp_cores, color="#2ca02c", ls=":", lw=1.6, zorder=2)
-        ax.annotate(f"≈{target/1e6:.0f} M/s @ ~{interp_cores:.1f} cores",
-                    xy=(interp_cores, 0.18), xytext=(interp_cores + 0.4, 0.10),
-                    color="#2ca02c", fontsize=9)
-    if op is not None:
-        e = op["cap_per_core"] / 1e6
-        ce = (op["sat_ci95"] / op["cores"]) / 1e6 if not math.isnan(op["sat_ci95"]) else None
-        txt = (f"{op['cores']} cores → {op['cap']/1e6:.2f} M/s total\n"
-               f"efficiency {e:.3f}"
-               + (f" ±{ce:.3f}" if ce is not None else "")
-               + " M/s/core")
-        ax.annotate(txt, xy=(op["cores"], e),
-                    xytext=(op["cores"] + 7, e + 0.04),
-                    fontsize=9, color="#1f77b4",
-                    bbox=dict(boxstyle="round,pad=0.35", fc="#eaf3fb", ec="#1f77b4", lw=1),
-                    arrowprops=dict(arrowstyle="->", color="#1f77b4", lw=1.2))
-
-    ax.set_xlabel("Prometheus cores (GOMAXPROCS = taskset width; ≤32 = physical cores, >32 = SMT siblings)")
-    ax.set_ylabel("Ingest per core (M samples/s/core)")
-    ax.set_title(f"Per-core efficiency with 95% CI — operating point at ≈{target/1e6:.0f} M/s\n"
-                 "AMD EPYC 7R32 (64 vCPU), Prometheus 3.12.0, 400k series/core")
-    ax.grid(True, alpha=0.3); ax.legend(fontsize=8.5, loc="upper right")
-    ax.set_xticks(cores); ax.set_ylim(bottom=0)
-    fig.tight_layout()
-    p2 = os.path.join(out_dir, "scale-efficiency-ci.png")
-    fig.savefig(p2, dpi=130, bbox_inches="tight")
-    print(f"wrote {p2}")
     plt.close(fig)
 
 
