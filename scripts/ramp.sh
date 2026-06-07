@@ -45,7 +45,9 @@ for S in $SERIES_LIST; do
     continue
   fi
 
-  read -r sustained creached cores cpm csc scores scpm sscr rate head rss sdur fail < <(
+  # One value per line into an array so EMPTY fields are preserved (read with a
+  # whitespace IFS would collapse consecutive empties and misalign the row).
+  mapfile -t F < <(
     jq -r '[(.measured.sustained_1s//false),
             (.measured.creation_reached//false),
             (.measured.cpu_cores_used//"" ),
@@ -58,8 +60,9 @@ for S in $SERIES_LIST; do
             (.measured.peak_head_series//""),
             (.measured.peak_rss_gib//""),
             (.measured.max_scrape_duration_s//""),
-            (.meta.fail_reason//"")] | @tsv' "$J")
-  echo "$S,$sustained,$creached,$cores,$cpm,$csc,$scores,$scpm,$sscr,$rate,$head,$rss,$sdur,$fail" >>"$AGG"
+            (.meta.fail_reason//"")] | .[] | tostring' "$J")
+  echo "$S,${F[0]},${F[1]},${F[2]},${F[3]},${F[4]},${F[5]},${F[6]},${F[7]},${F[8]},${F[9]},${F[10]},${F[11]},${F[12]}" >>"$AGG"
+  sustained="${F[0]}"; sdur="${F[4]}"; fail="${F[12]}"
 
   # Two distinct cliffs:
   #   soft cliff  = can't sustain 1s scrapes (scrape > 1s or up<1) -> note, keep climbing
