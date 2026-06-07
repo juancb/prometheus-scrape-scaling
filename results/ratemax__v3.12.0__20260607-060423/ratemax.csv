@@ -1,0 +1,3 @@
+step,targets,series_per_target,head_series,interval_s,scrape_s,ingest_rate_per_s,cpu_cores,cpu_pct_of_ncores,rss_gib,min_up,event
+1,24,100000,2.40012e+06,1.509,1.2574744500000001,1580972,2.401,15.0,3.47,1,
+2,24,200000,4.80012e+06,11.102,9.251641177,406434,0.664,4.1,7.96,1,

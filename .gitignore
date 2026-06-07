@@ -13,6 +13,13 @@ results/**/*.json
 results/**/prometheus.yml
 results/**/.snap
 
+# ...but DO keep the small distilled aggregate summaries (the scientific output).
+# These are a handful of rows each; they are the data the analysis/plots consume.
+!results/**/ratemax.csv
+!results/**/scale.csv
+!results/**/scale-summary.csv
+!results/ramp__*.csv
+
 # Transient TSDB data dirs
 tsdb-data/
 *.tsdb/
