@@ -27,6 +27,7 @@ constant. The target was **10 million samples/s**.
   failed to saturate the CPU there, so those points are reported as lower bounds.
 
   ![Figure 1](scale-rate-vs-cores.png)
+  (Figure 1: scale-rate-vs-cores.png)
 
 ---
 
