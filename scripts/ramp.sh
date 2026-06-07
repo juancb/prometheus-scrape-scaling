@@ -56,9 +56,15 @@ for S in $SERIES_LIST; do
             (.meta.fail_reason//"")] | @tsv' "$J")
   echo "$S,$sustained,$cores,$cpm,$rate,$head,$rss,$sdur,$fail" >>"$AGG"
 
-  if [[ "$sustained" != "true" || -n "$fail" ]]; then
-    echo "!! series=$S did NOT sustain 1s scrapes (sustained=$sustained fail=$fail)"
-    [[ "$STOP_ON_FAIL" == 1 ]] && { echo "==> cliff found at series=$S; stopping ramp"; break; }
+  # Two distinct cliffs:
+  #   soft cliff  = can't sustain 1s scrapes (scrape > 1s or up<1) -> note, keep climbing
+  #   hard cliff  = Prometheus process exited (OOM/crash)          -> stop the ramp
+  if [[ "$sustained" != "true" ]]; then
+    echo "!! soft cliff: series=$S did NOT sustain 1s scrapes (max_scrape=${sdur}s up>=? sustained=$sustained)"
+  fi
+  if [[ -n "$fail" ]]; then
+    echo "!! HARD cliff: series=$S -> $fail (likely OOM)"
+    [[ "$STOP_ON_FAIL" == 1 ]] && { echo "==> stopping ramp at hard failure series=$S"; break; }
   fi
 done
 

@@ -174,9 +174,13 @@ for ((s=0; s<DURATION; s++)); do
   # appended counter carries a {type="float"} label in v2.x/v3.x — match by prefix.
   appended="$(awk '/^prometheus_tsdb_head_samples_appended_total\{type="float"\}/{v=$2} END{print v}' "$PROM_SNAP")"
   appended="${appended:-NaN}"
-  up="$(api_scalar 'up{job="synthetic"}')"
-  sdur="$(api_scalar 'scrape_duration_seconds{job="synthetic"}')"
-  sscr="$(api_scalar 'scrape_samples_scraped{job="synthetic"}')"
+  # Aggregate across targets so these stay correct with >1 target:
+  #   up      -> min  (any target down is a failure)
+  #   sdur    -> max  (worst-case scrape time, our 3rd plotting dimension)
+  #   sscr    -> sum  (total samples scraped across targets)
+  up="$(api_scalar 'min(up{job="synthetic"})')"
+  sdur="$(api_scalar 'max(scrape_duration_seconds{job="synthetic"})')"
+  sscr="$(api_scalar 'sum(scrape_samples_scraped{job="synthetic"})')"
   ticks="$(proc_cpu_ticks)"
   pcpu="$(awk -v t="$ticks" -v h="$CLK_TCK" 'BEGIN{printf "%.3f", t/h}')"
 
