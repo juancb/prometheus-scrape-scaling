@@ -44,6 +44,23 @@ EXTRA_LABELS="${EXTRA_LABELS:-0}"
 WARMUP="${WARMUP:-5}"
 GO="${GO:-/usr/local/go/bin/go}"
 
+# AUTO_INTERVAL=1 sizes scrape interval=timeout to the expected one-time series
+# CREATION time (creation runs ~CREATE_RATE series/s on this host), so the big
+# first scrape can complete instead of hitting the timeout wall. After the head
+# fills, recurring scrapes are fast re-appends and we measure steady-state there.
+AUTO_INTERVAL="${AUTO_INTERVAL:-0}"
+CREATE_RATE="${CREATE_RATE:-150000}"   # series/s, measured on this box (~167k, derated)
+SAFETY="${SAFETY:-1.6}"                 # interval headroom over estimated creation time
+MIN_T="${MIN_T:-5}"; MAX_T="${MAX_T:-1200}"
+STEADY_TAIL="${STEADY_TAIL:-90}"        # extra seconds after creation to watch steady-state
+if [[ "$AUTO_INTERVAL" == 1 ]]; then
+  T="$(awk -v s="$SERIES" -v r="$CREATE_RATE" -v k="$SAFETY" -v lo="$MIN_T" -v hi="$MAX_T" \
+        'BEGIN{t=int(s/r*k)+1; if(t<lo)t=lo; if(t>hi)t=hi; print t}')"
+  INTERVAL="${T}s"; TIMEOUT="${T}s"
+  DURATION="${DURATION_OVERRIDE:-$((T + STEADY_TAIL))}"
+  echo "    AUTO_INTERVAL: interval=timeout=${T}s, duration=${DURATION}s (create_rate=${CREATE_RATE}/s)"
+fi
+
 # Count CPUs in a set like "0-7" or "0,2,4" so we can pin GOMAXPROCS to match.
 count_cores() {
   local spec="$1" total=0 part a b
@@ -157,9 +174,15 @@ CLK_TCK="$(getconf CLK_TCK)"
 echo "t_elapsed,cpu_seconds_total,rss_bytes,head_series,samples_appended_total,up,scrape_duration_seconds,scrape_samples_scraped,proc_cpu_seconds" >"$CSV"
 START_EPOCH="$(date +%s.%N)"
 FAIL_REASON=""
-for ((s=0; s<DURATION; s++)); do
+TARGET="$SERIES"; REACHED=0; STEADY_N=0
+# Hard wall on wallclock. In AUTO mode allow an extra interval for first-scrape
+# jitter to elapse before creation even begins.
+MAXWALL="$DURATION"
+[[ "$AUTO_INTERVAL" == 1 ]] && MAXWALL=$((DURATION + T))
+while :; do
   now="$(date +%s.%N)"
   elapsed="$(awk -v a="$now" -v b="$START_EPOCH" 'BEGIN{printf "%.3f", a-b}')"
+  [[ "$(awk -v e="$elapsed" -v m="$MAXWALL" 'BEGIN{print (e>=m)?1:0}')" == 1 ]] && break
 
   if ! kill -0 "$PROM_PID" 2>/dev/null; then
     FAIL_REASON="prometheus_process_exited"
@@ -185,6 +208,16 @@ for ((s=0; s<DURATION; s++)); do
   pcpu="$(awk -v t="$ticks" -v h="$CLK_TCK" 'BEGIN{printf "%.3f", t/h}')"
 
   echo "$elapsed,$cpu,$rss,$head,$appended,$up,$sdur,$sscr,$pcpu" >>"$CSV"
+
+  # Steady-state early stop (AUTO mode): once the head has filled to ~target, the
+  # one-time creation is done; sample STEADY_TAIL more recurring scrapes then stop.
+  if [[ "$AUTO_INTERVAL" == 1 ]]; then
+    [[ "$(awk -v h="$head" -v t="$TARGET" 'BEGIN{print (h+0>=0.98*t)?1:0}')" == 1 ]] && REACHED=1
+    if [[ "$REACHED" == 1 ]]; then
+      STEADY_N=$((STEADY_N+1))
+      [[ "$STEADY_N" -ge "$STEADY_TAIL" ]] && { echo "    head reached target; captured ${STEADY_N}s steady-state"; break; }
+    fi
+  fi
   sleep 1
 done
 
@@ -239,38 +272,76 @@ def delta(b, a, key):
     bv, av = f(b[key]), f(a[key])
     return (bv-av) if (bv is not None and av is not None) else None
 
-# Anchor the window to rows that actually recorded an appended-samples value
-# (the first few samples precede the first scrape), then drop `warm` of those.
-ingest_rows=[r for r in usable if f(r["samples_appended_total"]) is not None]
-if len(ingest_rows) > warm+1:
-    a=ingest_rows[warm]; b=ingest_rows[-1]
-    dt=delta(b,a,"t_elapsed") or 0.0
-    dcpu=delta(b,a,"cpu_seconds_total")
-    dsamp=delta(b,a,"samples_appended_total")
-    ups=[f(r["up"]) for r in usable[warm:] if f(r["up"]) is not None]
-    sdurs=[f(r["scrape_duration_seconds"]) for r in usable[warm:] if f(r["scrape_duration_seconds"]) is not None]
-    heads=[f(r["head_series"]) for r in usable if f(r["head_series"]) is not None]
-    rsss=[f(r["rss_bytes"]) for r in usable if f(r["rss_bytes"]) is not None]
-    sscr=[f(r["scrape_samples_scraped"]) for r in usable if f(r["scrape_samples_scraped"]) is not None]
+target=meta["series_target"]
+heads=[f(r["head_series"]) for r in usable if f(r["head_series"]) is not None]
+rsss=[f(r["rss_bytes"]) for r in usable if f(r["rss_bytes"]) is not None]
+sdurs=[f(r["scrape_duration_seconds"]) for r in usable if f(r["scrape_duration_seconds"]) is not None]
+ups=[f(r["up"]) for r in usable if f(r["up"]) is not None]
+sscr=[f(r["scrape_samples_scraped"]) for r in usable if f(r["scrape_samples_scraped"]) is not None]
 
-    samples_per_s = dsamp/dt if (dsamp is not None and dt>0) else None
-    cores_used   = dcpu/dt if (dcpu is not None and dt>0) else None
-    cpu_per_msamp= (dcpu/(dsamp/1e6)) if (dcpu is not None and dsamp and dsamp>0) else None
-    result["measured"]=dict(
-        window_s=round(dt,2),
-        cpu_seconds_used=round(dcpu,3) if dcpu is not None else None,
-        samples_appended=int(dsamp) if dsamp is not None else None,
-        ingest_samples_per_s=round(samples_per_s,1) if samples_per_s else None,
-        cpu_cores_used=round(cores_used,3) if cores_used else None,
-        cpu_pct_of_prom_allocation=round(100*cores_used/meta["prom_ncores"],1) if cores_used else None,
-        cpu_seconds_per_million_samples=round(cpu_per_msamp,4) if cpu_per_msamp else None,
-        peak_head_series=int(max(heads)) if heads else None,
-        max_scrape_samples_scraped=int(max(sscr)) if sscr else None,
+# --- creation window: CPU burned while the head fills. Series creation IS the
+# ingest work (parse + label intern + index posting + head append + WAL), and
+# samples_appended only commits at scrape end, so head_series is the live signal.
+# This is well-defined at every cardinality, including partial fills before OOM.
+istart=iend=None
+for i,r in enumerate(usable):
+    hv=f(r["head_series"])
+    if hv is None: continue
+    if istart is None and hv>0: istart=i
+    if hv>=0.98*target: iend=i; break
+creation_reached = iend is not None
+if istart is not None and iend is None:
+    iend=len(usable)-1   # never fully filled (timeout wall or OOM) -> measure the climb
+
+if heads:
+    interval_s=float("$INTERVAL".rstrip('s') or 1)
+    measured=dict(
+        peak_head_series=int(max(heads)),
         peak_rss_gib=round(max(rsss)/(1<<30),2) if rsss else None,
+        max_scrape_samples_scraped=int(max(sscr)) if sscr else None,
         min_up=min(ups) if ups else None,
         max_scrape_duration_s=round(max(sdurs),3) if sdurs else None,
-        sustained_1s=(bool(ups) and min(ups)==1 and bool(sdurs) and max(sdurs) < float("$INTERVAL".rstrip('s') or 1)),
+        sustained_1s=(bool(ups) and min(ups)==1 and bool(sdurs) and max(sdurs) < interval_s),
+        creation_reached=creation_reached,
+        creation_scrape_duration_s=round(max(sdurs),3) if sdurs else None,
     )
+    if istart is not None and iend is not None and iend>istart:
+        a=usable[istart]; b=usable[iend]
+        dt=delta(b,a,"t_elapsed") or 0.0
+        dcpu=delta(b,a,"cpu_seconds_total")
+        dhead=delta(b,a,"head_series")            # series created in the window
+        measured.update(
+            window_s=round(dt,2),
+            series_created=int(dhead) if dhead is not None else None,
+            cpu_seconds_used=round(dcpu,3) if dcpu is not None else None,
+            ingest_series_per_s=round(dhead/dt,1) if (dhead is not None and dt>0) else None,
+            cpu_cores_used=round(dcpu/dt,3) if (dcpu is not None and dt>0) else None,
+            cpu_pct_of_prom_allocation=round(100*(dcpu/dt)/meta["prom_ncores"],1) if (dcpu is not None and dt>0) else None,
+            cpu_seconds_per_million_series=round(dcpu/(dhead/1e6),4) if (dcpu is not None and dhead and dhead>0) else None,
+        )
+    # --- steady-state bonus: recurring re-append after the head is full (only
+    # resolvable when the scrape interval is short enough to fit >=2 post scrapes).
+    if creation_reached:
+        steady=usable[(iend+1):]
+        steady_ing=[r for r in steady if f(r["samples_appended_total"]) is not None]
+        if len(steady_ing)>=2:
+            sa,sb=steady_ing[0],steady_ing[-1]
+            sdt=delta(sb,sa,"t_elapsed") or 0.0
+            sdcpu=delta(sb,sa,"cpu_seconds_total")
+            sdsamp=delta(sb,sa,"samples_appended_total")
+            # Exclude the creation scrape's value, which lingers in scrape_duration
+            # for a few samples after the head fills, until the next re-append scrape.
+            cval=max(sdurs) if sdurs else None
+            s_sdurs=[f(r["scrape_duration_seconds"]) for r in steady
+                     if f(r["scrape_duration_seconds"]) is not None
+                     and (cval is None or abs(f(r["scrape_duration_seconds"])-cval)>1e-6)]
+            measured.update(
+              steady_window_s=round(sdt,2),
+              steady_cpu_cores=round(sdcpu/sdt,3) if (sdcpu is not None and sdt>0) else None,
+              steady_cpu_s_per_million=round(sdcpu/(sdsamp/1e6),4) if (sdcpu is not None and sdsamp and sdsamp>0) else None,
+              steady_scrape_duration_s=round(max(s_sdurs),3) if s_sdurs else None,
+            )
+    result["measured"]=measured
 
 with open(json_path,"w") as fh: json.dump(result, fh, indent=2)
 
@@ -286,15 +357,26 @@ lines=[
 ]
 if m:
     lines += [
-     f"Window measured:          {m['window_s']} s",
-     f"Peak head series:         {m['peak_head_series']:,}" if m['peak_head_series'] else "Peak head series:         n/a",
-     f"Samples scraped/scrape:   {m['max_scrape_samples_scraped']:,}" if m['max_scrape_samples_scraped'] else "",
-     f"Ingest rate:              {m['ingest_samples_per_s']:,.0f} samples/s" if m['ingest_samples_per_s'] else "Ingest rate: n/a",
-     f"CPU used for ingest:      {m['cpu_cores_used']} cores ({m['cpu_pct_of_prom_allocation']}% of {meta['prom_ncores']} allocated)" if m['cpu_cores_used'] else "",
-     f"CPU per 1M samples:       {m['cpu_seconds_per_million_samples']} cpu-seconds" if m['cpu_seconds_per_million_samples'] else "",
-     f"Peak RSS:                 {m['peak_rss_gib']} GiB" if m['peak_rss_gib'] else "",
-     f"1s scrape sustained:      {m['sustained_1s']} (min up={m['min_up']}, max scrape={m['max_scrape_duration_s']}s)",
+     f"Peak head series:         {m['peak_head_series']:,}" if m.get('peak_head_series') else "Peak head series:         n/a",
+     f"Creation reached target:  {m.get('creation_reached')}",
+     f"Peak RSS:                 {m['peak_rss_gib']} GiB" if m.get('peak_rss_gib') else "",
+     f"1s scrape sustained:      {m['sustained_1s']} (min up={m.get('min_up')}, max scrape={m.get('max_scrape_duration_s')}s)",
+     "-"*64,
+     "CREATION (ingest of N new series):",
+     f"  window:                 {m.get('window_s')} s" if m.get('window_s') is not None else "",
+     f"  series created:         {m['series_created']:,}" if m.get('series_created') else "",
+     f"  CPU used for ingest:    {m['cpu_cores_used']} cores ({m.get('cpu_pct_of_prom_allocation')}% of {meta['prom_ncores']} allocated)" if m.get('cpu_cores_used') is not None else "",
+     f"  CPU per 1M series:      {m['cpu_seconds_per_million_series']} cpu-seconds" if m.get('cpu_seconds_per_million_series') is not None else "",
+     f"  ingest rate:            {m['ingest_series_per_s']:,.0f} series/s" if m.get('ingest_series_per_s') else "",
+     f"  scrape duration (1x):   {m.get('creation_scrape_duration_s')} s   <- worst-case scrape time (3rd plot axis)",
     ]
+    if m.get("steady_cpu_cores") is not None:
+        lines += [
+         "STEADY-STATE (recurring re-append):",
+         f"  CPU:                    {m.get('steady_cpu_cores')} cores",
+         f"  CPU per 1M samples:     {m.get('steady_cpu_s_per_million')} cpu-seconds" if m.get('steady_cpu_s_per_million') is not None else "",
+         f"  scrape duration:        {m.get('steady_scrape_duration_s')} s",
+        ]
 else:
     lines += ["No usable samples (Prometheus may have failed immediately)."]
 open(txt_path,"w").write("\n".join(l for l in lines if l)+"\n")

@@ -26,7 +26,7 @@ STOP_ON_FAIL="${STOP_ON_FAIL:-1}"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 AGG="results/ramp__${PROM_VERSION}__${TS}.csv"
-echo "series,sustained_1s,cpu_cores_used,cpu_s_per_million,ingest_samples_per_s,peak_head_series,peak_rss_gib,max_scrape_s,fail_reason" >"$AGG"
+echo "series,sustained_1s,creation_reached,cpu_cores_used,cpu_s_per_million_series,creation_scrape_s,steady_cpu_cores,steady_cpu_s_per_million,steady_scrape_s,ingest_series_per_s,peak_head_series,peak_rss_gib,max_scrape_s,fail_reason" >"$AGG"
 echo "==> ramp $PROM_VERSION  ladder: $SERIES_LIST  -> $AGG"
 
 for S in $SERIES_LIST; do
@@ -45,16 +45,21 @@ for S in $SERIES_LIST; do
     continue
   fi
 
-  read -r sustained cores cpm rate head rss sdur fail < <(
+  read -r sustained creached cores cpm csc scores scpm sscr rate head rss sdur fail < <(
     jq -r '[(.measured.sustained_1s//false),
+            (.measured.creation_reached//false),
             (.measured.cpu_cores_used//"" ),
-            (.measured.cpu_seconds_per_million_samples//""),
-            (.measured.ingest_samples_per_s//""),
+            (.measured.cpu_seconds_per_million_series//""),
+            (.measured.creation_scrape_duration_s//""),
+            (.measured.steady_cpu_cores//""),
+            (.measured.steady_cpu_s_per_million//""),
+            (.measured.steady_scrape_duration_s//""),
+            (.measured.ingest_series_per_s//""),
             (.measured.peak_head_series//""),
             (.measured.peak_rss_gib//""),
             (.measured.max_scrape_duration_s//""),
             (.meta.fail_reason//"")] | @tsv' "$J")
-  echo "$S,$sustained,$cores,$cpm,$rate,$head,$rss,$sdur,$fail" >>"$AGG"
+  echo "$S,$sustained,$creached,$cores,$cpm,$csc,$scores,$scpm,$sscr,$rate,$head,$rss,$sdur,$fail" >>"$AGG"
 
   # Two distinct cliffs:
   #   soft cliff  = can't sustain 1s scrapes (scrape > 1s or up<1) -> note, keep climbing
