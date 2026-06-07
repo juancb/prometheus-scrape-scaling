@@ -101,7 +101,7 @@ def main(paths):
     # ---- 3D: state space of ingest-to-failure ----
     #   X = head series (load)   Y = worst-case scrape (failure signal)
     #   Z = CPU utilization %    color = RSS GiB (memory)
-    fig = plt.figure(figsize=(17, 12))
+    fig = plt.figure(figsize=(34, 24))
     ax = fig.add_subplot(111, projection="3d")
     sc = None
     for i, (label, rows) in enumerate(datasets):
