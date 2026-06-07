@@ -20,7 +20,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-OUT = "results/plots"
+OUT = os.environ.get("OUT", "results/plots")
+# Drop CPU points above this cpu-s/1M — they are creation-contaminated (a long
+# scrape that never committed samples inside the measure window). Set high to
+# disable. Scrape/RSS curves are unaffected; they keep every row.
+CPM_MAX = float(os.environ.get("CPM_MAX", "1e9"))
 os.makedirs(OUT, exist_ok=True)
 
 
@@ -42,17 +46,31 @@ def load(path):
 
 
 def series_axis(r):
-    return num(r.get("series"))
+    # growth CSVs key on head_series; ramp CSVs on series
+    return num(r.get("head_series")) or num(r.get("series"))
 
 
 def cpu_axis(r):
-    # primary: cpu-seconds per million series (creation ingest cost)
-    return num(r.get("cpu_s_per_million_series")) or num(r.get("cpu_cores_used"))
+    # cpu-seconds per million samples/series (interval-independent ingest cost).
+    # Returns None for creation-contaminated outliers so they drop from CPU/3D plots.
+    v = (num(r.get("cpu_s_per_million"))
+         or num(r.get("cpu_s_per_million_series"))
+         or num(r.get("cpu_cores_used")))
+    if v is not None and v > CPM_MAX:
+        return None
+    return v
 
 
 def scrape_axis(r):
-    # worst-case completed scrape time = the creation scrape
-    return num(r.get("creation_scrape_s")) or num(r.get("max_scrape_s"))
+    # worst-case scrape time across targets
+    return num(r.get("worst_scrape_s")) or num(r.get("creation_scrape_s")) or num(r.get("max_scrape_s"))
+
+
+def avg_cores(r):
+    # Sustained cores used for ingest (avg over the scrape duty cycle). With many
+    # targets, Prometheus staggers scrapes across the interval, so this average is
+    # the honest "cores for ingest" figure (it rises as scrapes lengthen + overlap).
+    return num(r.get("cpu_cores")) or num(r.get("cpu_cores_used"))
 
 
 def failed(r):
@@ -124,9 +142,11 @@ def main(paths):
         fig.savefig(f"{OUT}/{fname}", dpi=130)
         print(f"wrote {OUT}/{fname}")
 
-    plot2d(cpu_axis, "CPU-s per 1M series (ingest cost)", "cpu_vs_series.png")
+    plot2d(cpu_axis, "CPU-s per 1M samples (ingest cost)", "cpu_vs_series.png")
     plot2d(scrape_axis, "worst-case scrape duration (s)", "scrape_vs_series.png", logy=True)
-    plot2d(lambda r: num(r.get("peak_rss_gib")), "peak RSS (GiB)", "rss_vs_series.png")
+    plot2d(avg_cores, "sustained cores used for ingest", "cores_vs_series.png")
+    plot2d(lambda r: num(r.get("rss_gib")) or num(r.get("peak_rss_gib")),
+           "RSS (GiB)", "rss_vs_series.png")
 
 
 if __name__ == "__main__":
