@@ -1,0 +1,15 @@
+# Rendered by scripts/run-bench.sh — placeholders __INTERVAL__ / __TIMEOUT__ / __GEN_PORT__
+# are substituted per run. One synthetic target, scraped as fast as the interval allows.
+global:
+  scrape_interval: __INTERVAL__
+  scrape_timeout: __TIMEOUT__
+  # Keep external/eval work out of the way; we only care about scrape ingest.
+  evaluation_interval: 1m
+
+scrape_configs:
+  - job_name: synthetic
+    honor_timestamps: true
+    static_configs:
+      - targets: ["127.0.0.1:__GEN_PORT__"]
+        labels:
+          bench: "ingest"

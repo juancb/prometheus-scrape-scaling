@@ -1,0 +1,15 @@
+Run:        apt-2.45.3__series-100000__20260607-041538
+Host:       ubuntu-m-16vcpu-128gb-sfo3  (16 vCPU, 125.8 GiB)
+CPU:        Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz
+Prometheus: apt-2.45.3  pinned to cores 0-7 (8 cores)
+Target:     100,000 series @ 1s (payload 2.9 MiB)
+Fail:       none
+----------------------------------------------------------------
+Window measured:          19.99 s
+Peak head series:         100,005
+Samples scraped/scrape:   100,000
+Ingest rate:              100,065 samples/s
+CPU used for ingest:      0.126 cores (1.6% of 8 allocated)
+CPU per 1M samples:       1.2599 cpu-seconds
+Peak RSS:                 0.28 GiB
+1s scrape sustained:      True (min up=1.0, max scrape=0.478s)

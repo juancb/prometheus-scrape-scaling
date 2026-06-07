@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /home/jbran/claude-prometheus-benchmark/ 2>/dev/null; echo \"---\"; cat /home/jbran/claude-prometheus-benchmark/*.md 2>/dev/null; echo \"---ssh config---\"; cat ~/.ssh/config 2>/dev/null)",
+      "Bash(hostname; hostname *)",
+      "Bash(find / -maxdepth 4 -iname \"*prometheus*\")",
+      "Bash(dpkg -l)",
+      "Bash(lscpu)",
+      "Bash(systemctl is-active *)",
+      "Read(//proc/**)",
+      "Bash(chmod +x scripts/run-bench.sh)",
+      "Bash(mkdir -p results)",
+      "Bash(touch results/.gitkeep)",
+      "Bash(/usr/local/go/bin/go build *)",
+      "Bash(PROM_BIN=/usr/bin/prometheus PROM_VERSION=apt-2.45.3 SERIES=100000 DURATION=25 bash scripts/run-bench.sh)"
+    ]
+  }
+}
