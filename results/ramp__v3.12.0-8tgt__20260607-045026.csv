@@ -1,0 +1,7 @@
+series,sustained_1s,creation_reached,cpu_cores_used,cpu_s_per_million_series,creation_scrape_s,steady_cpu_cores,steady_cpu_s_per_million,steady_scrape_s,ingest_series_per_s,peak_head_series,peak_rss_gib,max_scrape_s,fail_reason
+800000,false,true,3.621,20.3149,2.804,1.157,1.4232,0.144,178231.2,800040,1.22,2.804,
+1600000,false,true,3.355,15.9803,6.675,2.443,1.5206,0.312,209963.8,1600040,2.3,6.675,
+2400000,false,false,3.075,14.1372,8.538,217545.0,2346979,2.72,8.538,,,,
+3200000,false,false,2.524,11.3413,222574.2,2373453,2.14,,,,,,
+4000000,false,false,2.573,11.8813,216584.6,2281062,2.11,,,,,,
+4800000,false,false,2.535,11.1148,228045.9,2404122,2.33,,,,,,
