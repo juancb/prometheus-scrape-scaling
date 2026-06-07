@@ -11,6 +11,7 @@ results/**/*.csv
 results/**/*.log
 results/**/*.json
 results/**/prometheus.yml
+results/**/.snap
 
 # Transient TSDB data dirs
 tsdb-data/
