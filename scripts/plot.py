@@ -101,7 +101,7 @@ def main(paths):
     # ---- 3D: state space of ingest-to-failure ----
     #   X = head series (load)   Y = worst-case scrape (failure signal)
     #   Z = CPU utilization %    color = RSS GiB (memory)
-    fig = plt.figure(figsize=(11, 8))
+    fig = plt.figure(figsize=(17, 12))
     ax = fig.add_subplot(111, projection="3d")
     sc = None
     for i, (label, rows) in enumerate(datasets):
@@ -117,14 +117,16 @@ def main(paths):
                             edgecolors="k", linewidths=0.4, depthshade=False,
                             label=label, zorder=3)
             for x, y, z in zip(xs, ys, zs):
-                ax.text(x, y, z, f"  {x/1e6:.0f}M", fontsize=7, color="0.25")
-    ax.set_xlabel("head series (load)", labelpad=10)
-    ax.set_ylabel("worst-case scrape (s)", labelpad=10)
-    ax.set_zlabel("CPU utilization (% of cores)", labelpad=8)
-    ax.set_title("Prometheus ingest-to-failure: load x scrape-time x CPU (color = RSS GiB)")
+                ax.text(x, y, z, f"  {x/1e6:.0f}M", fontsize=10, color="0.2")
+    ax.set_xlabel("head series (load)", labelpad=16, fontsize=12)
+    ax.set_ylabel("worst-case scrape (s)", labelpad=16, fontsize=12)
+    ax.set_zlabel("CPU utilization (% of cores)", labelpad=12, fontsize=12)
+    ax.tick_params(labelsize=10)
+    ax.set_title("Prometheus ingest-to-failure: load x scrape-time x CPU (color = RSS GiB)",
+                 fontsize=14)
     ax.view_init(elev=18, azim=-72)
     if sc is not None:
-        cb = fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.12); cb.set_label("RSS (GiB)")
+        cb = fig.colorbar(sc, ax=ax, shrink=0.6, pad=0.10); cb.set_label("RSS (GiB)", fontsize=12)
     fig.tight_layout()
     fig.savefig(f"{OUT}/ingest_3d.png", dpi=130)
     print(f"wrote {OUT}/ingest_3d.png")
