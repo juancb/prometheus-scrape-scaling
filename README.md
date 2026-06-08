@@ -1,16 +1,28 @@
 # Prometheus Ingest Benchmark
 
-Measures **how much CPU one Prometheus server spends on scrape ingest** as series
-cardinality climbs toward failure. Runs entirely on the host it benchmarks.
+Measures **how much CPU one Prometheus server spends on scrape ingest**, how its
+throughput scales with cores toward a **10M samples/s** target, and how it behaves
+at that operating point over a full TSDB compaction cycle. Runs entirely on the host
+it benchmarks.
 
-## Host under test
+## Reports
 
-| | |
-|---|---|
-| Host | `ubuntu-m-16vcpu-128gb-sfo3` (Ubuntu 24.04.3) |
-| CPU | Intel Xeon Gold 6248 @ 2.50GHz, **16 vCPU** (1 thread/core) |
-| RAM | **128 GB** (no swap) |
-| Disk | 387 GB volume, ~381 GB free |
+Three self-contained write-ups, each with its own data and rendered plots:
+
+| Report | Box | Question answered |
+|---|---|---|
+| **[RESULTS.md](RESULTS.md)** | Intel Xeon, 16 vCPU | Ingest to failure: peak rate (**≈7.7M/s, CPU-bound**), the cardinality cliff, and the OOM ceiling. |
+| **[results/scale-cores…/REPORT.md](results/scale-cores__v3.12.0__20260607-081659/REPORT.md)** | AMD EPYC, 64 vCPU | How ingest scales with cores — **~16 cores sustains 10M/s** (+ [FAQ](results/scale-cores__v3.12.0__20260607-081659/FAQ.md)). |
+| **[results/endurance…/REPORT.md](results/endurance__v3.12.0__20260607-181804/REPORT.md)** | AMD EPYC, 64 vCPU | 10M/s endurance: the **first 2h compaction stalls & nearly OOMs** at 16 cores. |
+
+## Hosts under test
+
+| | Cardinality-to-failure (RESULTS.md) | Core-scaling & endurance (EPYC reports) |
+|---|---|---|
+| Host | `ubuntu-m-16vcpu-128gb-sfo3` | AWS EPYC instance |
+| CPU | Intel Xeon Gold 6248, **16 vCPU** (1 thread/core) | AMD EPYC 7R32, **64 vCPU** (32 cores × 2 SMT) |
+| RAM | **128 GB** (no swap) | **124 GiB** (no swap) |
+| Disk | 387 GB volume | instance-store **NVMe** (`/mnt/tsdb`) |
 
 ## Architecture (in Prometheus terms)
 
@@ -65,35 +77,39 @@ box OOMs somewhere around **80–90M series**.
 
 ## Modes / scripts
 
-| Script | What it does |
-|---|---|
-| `scripts/run-bench.sh` | One cold run: starts exporters + a fresh Prometheus, samples 1/s, writes `samples.csv` + `summary.{json,txt}`. Knobs: `SERIES` (total), `TARGETS`, `AUTO_INTERVAL`, `INTERVAL`, `DURATION`, `PROM_CORES`/`GEN_CORES`. |
-| `scripts/ramp.sh` | Cold-restart ladder over `SERIES_LIST`; aggregates each run's summary to one CSV. Good for the per-cardinality curve and the **strict-1s scrape-timeout wall**. |
-| `scripts/grow-to-oom.sh` | **One** long-lived Prometheus, **fixed `TARGETS` (= cores)**, grows each target's series via `/resize` until **OOM**. Records steady CPU + worst-case scrape + RSS at each plateau. This is the "test to failure" runner. |
-| `scripts/rate-max.sh` | Finds **peak sustained ingest rate** (samples/s actually appended). `TARGETS > cores`; at each cardinality it auto-tightens the scrape interval toward the back-to-back (CPU-bound) regime and records the max rate, CPU util, and RSS. Answers "how fast can it ingest?" |
-| `scripts/plot.py` | 3D plot (series × CPU × scrape time) + 2D projections from a ramp/growth CSV; OOM marked. |
-| `scripts/plot-rate.py` | Rate-max plots: ingest rate / CPU util / RSS vs cardinality + a 3D (rate × CPU × memory). |
+| Script | Feeds | What it does |
+|---|---|---|
+| `scripts/grow-to-oom.sh` | RESULTS.md | **One** long-lived Prometheus, **fixed `TARGETS` (= cores)**, grows each target's series via `/resize` until **OOM**. Records steady CPU + worst-case scrape + RSS at each plateau. The "test to failure" runner. |
+| `scripts/rate-max.sh` | RESULTS.md | Finds **peak sustained ingest rate** (samples/s actually appended). `TARGETS > cores`; at each cardinality it auto-tightens the scrape interval toward the back-to-back (CPU-bound) regime and records max rate, CPU util, and RSS. |
+| `scripts/plot.py` | RESULTS.md | 3D plot (series × CPU × scrape time) + 2D projections from a growth CSV; OOM marked. |
+| `scripts/plot-rate.py` | RESULTS.md | Rate-max plots: ingest rate / CPU util / RSS vs cardinality + a 3D (rate × CPU × memory). |
+| `scripts/scale-cores.sh` | scale-cores report | Strong-scaling sweep: holds per-core cardinality constant, varies `GOMAXPROCS`+`taskset` core count, measures peak ingest with replicates. A closed-loop controller tightens the interval to hold the box saturated. |
+| `scripts/analyze-scale.py` | scale-cores report | Saturation-aware analysis of `scale.csv` → `scale-summary.csv` + the two-panel capacity/efficiency plot with 95% CIs. |
+| `scripts/endurance-compaction.sh` | endurance report | Runs the 10M/s operating point continuously on NVMe and samples TSDB/CPU/RSS/scrape every 10s across the first **2h-block head compaction**. |
+| `scripts/analyze-endurance.py` | endurance report | Detects compaction onset (head span ≥ 3h) and renders the 4-panel endurance time series. |
 
 Go is at `/usr/local/go/bin` (1.26.x).
 
 ### Examples
 
 ```bash
-# Cold single run (validate harness)
-PROM_BIN=/usr/bin/prometheus PROM_VERSION=apt-2.45.3 SERIES=100000 DURATION=25 \
-  bash scripts/run-bench.sh
-
-# Strict-1s wall (single target)
-PROM_BIN=/usr/bin/prometheus PROM_VERSION=apt-2.45.3 \
-  SERIES_LIST="100000 200000 300000 400000 500000" DURATION=18 bash scripts/ramp.sh
-
 # Grow to OOM: 16 targets across 16 cores, +16M series/step
 TARGETS=16 CORES=0-15 K_START=1000000 K_STEP=1000000 INTERVAL=30s \
   PROM_BIN=/home/jbran/prometheus-3.12.0.linux-amd64/prometheus PROM_VERSION=v3.12.0 \
   bash scripts/grow-to-oom.sh
+
+# Peak ingest rate sweep
+bash scripts/rate-max.sh
+
+# Core-scaling toward 10M/s (EPYC), then analyze
+bash scripts/scale-cores.sh && python3 scripts/analyze-scale.py
+
+# 10M/s endurance through the first 2h compaction (EPYC), then analyze
+bash scripts/endurance-compaction.sh && python3 scripts/analyze-endurance.py
 ```
 
 ## Key findings
 
-See **[RESULTS.md](RESULTS.md)** for the measured curves, the strict-1s wall, the
-multi-target scaling, and the OOM cardinality for each binary.
+See the three **[Reports](#reports)** above: `RESULTS.md` (cardinality-to-failure &
+peak rate on 16 vCPU), the **scale-cores** report (core-scaling to 10M/s on 64 vCPU),
+and the **endurance** report (10M/s across the first 2h compaction).

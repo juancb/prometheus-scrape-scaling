@@ -1,8 +1,0 @@
-Run:        v3.12.0__series-5000000__20260607-042233
-Host:       ubuntu-m-16vcpu-128gb-sfo3  (16 vCPU, 125.8 GiB)
-CPU:        Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz
-Prometheus: v3.12.0  pinned to cores 0-7 (8 cores)
-Target:     5,000,000 series @ 1s (payload 156.3 MiB)
-Fail:       none
-----------------------------------------------------------------
-No usable samples (Prometheus may have failed immediately).
